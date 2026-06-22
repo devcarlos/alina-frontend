@@ -2,20 +2,14 @@
 //  ContentView.swift
 //  AlinaTest
 //
-//  Created by Carlos Alcala on 22/6/26.
+//  App entry point. Delegates all UI to AmountInputView.
 //
 
 import SwiftUI
 
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
+        AmountInputView()
     }
 }
 

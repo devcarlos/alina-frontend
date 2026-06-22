@@ -2,13 +2,16 @@
 //  AlinaTestApp.swift
 //  AlinaTest
 //
-//  Created by Carlos Alcala on 22/6/26.
-//
 
 import SwiftUI
 
 @main
 struct AlinaTestApp: App {
+
+    init() {
+        FontLoader.loadFonts()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
