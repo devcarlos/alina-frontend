@@ -2,25 +2,16 @@
 //  HoloBorder.metal
 //  AlinaTest
 //
-//  SwiftUI-stitchable Metal shader that paints a rotating holographic border.
+//  Animates the "border" image asset. The `color` input is the real image pixel
+//  (pink/purple/blue from the asset) — colours and pattern are fully preserved.
+//  Only brightness is modulated so the animation is clearly visible.
 //
-//  Key idea: instead of a horizontal UV sweep (which makes a narrow badge look
-//  like a single flat colour), we compute each pixel's angle from the view
-//  centre and use that as the gradient coordinate.  Adding `time` rotates the
-//  colours around the perimeter — identical behaviour to AngularGradient but
-//  with full Metal colour control and a shimmer layer on top.
-//
-//  Usage (SwiftUI):
-//    ShapeView
-//      .colorEffect(ShaderLibrary.holoBorder(.float2(w, h), .float(time)))
-//
-//  Auto-injected by SwiftUI:
-//    position — pixel coordinate in view-local space
-//    color    — source pixel colour / alpha (alpha is used as the stroke mask)
-//
-//  Caller-supplied:
-//    size  — view size in points (.float2(width, height))
-//    time  — elapsed seconds (.float(Date.timeIntervalSinceReferenceDate))
+//  Effects:
+//    1. Deep brightness wave  — dims to 30 % then peaks at 100 %, one full
+//                               cycle clockwise every ~2.5 s.
+//    2. Fast shimmer          — higher-frequency flicker for the foil texture.
+//    3. Two travelling glints — sharp bright reflections orbiting in opposite
+//                               directions, wide enough to be clearly visible.
 //
 
 #include <metal_stdlib>
@@ -33,39 +24,39 @@ using namespace metal;
     float2 size,
     float  time
 ) {
-    // Skip transparent pixels (outside the stroke path).
     if (color.a < 0.01h) return color;
 
-    // ── Angular gradient coordinate ───────────────────────────────────────────
-    // Compute angle of this pixel around the shape centre [-π, π],
-    // normalise to [0, 1], then offset by time so the colours rotate.
-    float2 center = size * 0.5;
+    // Angular position [0, 1) around badge centre
+    float2 center = size * 0.5f;
     float2 delta  = position - center;
-    float  angle  = atan2(delta.y, delta.x);              // radians
-    float  t      = fract(angle / (2.0 * M_PI_F) + time * 0.22);
+    float  angle  = atan2(delta.y, delta.x);
+    float  aT     = fract(angle / (2.0f * M_PI_F));
 
-    // ── Brand palette ─────────────────────────────────────────────────────────
-    half3 hotPink = half3(1.000h, 0.302h, 0.769h);   // #FF4DC4 — vivid pink
-    half3 pink    = half3(0.698h, 0.302h, 0.800h);   // #B24DCC
-    half3 purple  = half3(0.537h, 0.333h, 0.976h);   // #8955F9
-    half3 blue    = half3(0.357h, 0.620h, 0.976h);   // #5B9EF9
+    // 1. Deep brightness wave — large amplitude so the dim/bright is obvious
+    float wave = 0.30f + 0.70f * (0.5f + 0.5f * sin(aT * 6.28318f - time * 2.5f));
 
-    // 4-stop loop: hotPink → purple → blue → pink → hotPink
-    half3 grad;
-    if (t < 0.25h) {
-        grad = mix(hotPink, purple, half(t / 0.25));
-    } else if (t < 0.5h) {
-        grad = mix(purple,  blue,   half((t - 0.25) / 0.25));
-    } else if (t < 0.75h) {
-        grad = mix(blue,    pink,   half((t - 0.50) / 0.25));
-    } else {
-        grad = mix(pink,    hotPink, half((t - 0.75) / 0.25));
-    }
+    // 2. Fast shimmer overlay
+    float shimmer = 0.85f + 0.15f * sin(aT * 6.28318f * 4.0f + time * 8.0f);
 
-    // ── Shimmer — subtle brightness pulse that also travels around the ring ──
-    float shimmer = 0.80 + 0.20 * sin(time * 4.0 + angle * 2.5);
-    grad *= half(shimmer);
+    // 3a. Glint A — orbits clockwise every ~3 s, wide soft peak
+    float g1pos  = fract(time * 0.33f);
+    float g1dist = abs(aT - g1pos);
+    g1dist = min(g1dist, 1.0f - g1dist);
+    float glint1 = pow(max(0.0f, 1.0f - g1dist * 10.0f), 2.5f);
 
-    grad = clamp(grad, 0.0h, 1.0h);
-    return half4(grad, color.a);
+    // 3b. Glint B — orbits counter-clockwise every ~5 s
+    float g2pos  = fract(-time * 0.20f + 0.5f);
+    float g2dist = abs(aT - g2pos);
+    g2dist = min(g2dist, 1.0f - g2dist);
+    float glint2 = pow(max(0.0f, 1.0f - g2dist * 10.0f), 2.5f);
+
+    float glint = clamp(glint1 + glint2, 0.0f, 1.0f);
+
+    // Combine: modulate image brightness then add glint
+    half brightness = half(wave * shimmer);
+    half3 col = color.rgb * brightness;
+    // Glint: blend toward a bright slightly-pink white
+    col = mix(col, half3(1.0h, 0.85h, 1.0h), half(glint * 0.80f));
+
+    return half4(clamp(col, 0.0h, 1.0h), color.a);
 }
