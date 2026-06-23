@@ -6,7 +6,7 @@ An iOS prototype for Alinea Invest's investment amount entry screen. The user ty
 
 ## Preview
 
-<video src="https://github.com/devcarlos/alina-frontend/blob/main/EVIDENCE1.mov" controls width="320"></video>
+<video src="https://github.com/devcarlos/alina-frontend/raw/main/EVIDENCE1.mov" controls width="320"></video>
 
 ---
 
