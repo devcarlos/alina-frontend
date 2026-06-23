@@ -4,6 +4,12 @@ An iOS prototype for Alinea Invest's investment amount entry screen. The user ty
 
 ---
 
+## Preview
+
+<video src="https://github.com/devcarlos/alina-frontend/blob/main/EVIDENCE1.mov" controls width="320"></video>
+
+---
+
 ## Requirements
 
 | Tool | Version |
@@ -21,7 +27,7 @@ An iOS prototype for Alinea Invest's investment amount entry screen. The user ty
 | # | Feature | Implementation |
 |---|---------|----------------|
 | 1 | **Suggestion bubbles** visible only when input is empty | `ZStack` + `if isEmpty` with asymmetric spring transition |
-| 2 | **AUTOMATED badge** with holographic border | Design asset (`border.imageset`) primary; Metal `holoBorder` shader fallback |
+| 2 | **AUTOMATED badge** with animatable holographic border | `BadgeBorderStyle` enum: `.normal` (static asset), `.animated` (SwiftUI brightness + hue rotation), `.metalShader` (Metal `holoBorder` shader) |
 | 3 | **Review button** with animated neon glow + gradient border | 5-layer `ZStack`: gradient glow → gradient border → white glow → white pill → label |
 | 4 | **Bubbles → Review button transition** | Asymmetric `.scale` + `.opacity` spring transitions |
 | 5 | **Haptic feedback** on every keypad and bubble tap | `UIImpactFeedbackGenerator(.light)` via `Haptics.impact()` |
@@ -45,7 +51,7 @@ AlinaTest/AlinaTest/
 │
 ├── UI/
 │   ├── Components/
-│   │   ├── AutomatedBadge.swift   # Nav bar pill: asset border + Metal shader fallback
+│   │   ├── AutomatedBadge.swift   # Nav bar pill: BadgeBorderStyle enum (normal / animated / metalShader)
 │   │   ├── SuggestionBubble.swift # Preset amount bubbles ($500 / $2,000 / $10,000)
 │   │   ├── ReviewButton.swift     # 5-layer animated CTA button
 │   │   └── NumPadKey.swift        # Individual number-pad key (digit / decimal / delete)
@@ -54,7 +60,7 @@ AlinaTest/AlinaTest/
 │       └── AnimatedGradientBorder.swift # Generic rotating-gradient stroke ViewModifier
 │
 ├── Shaders/
-│   └── HoloBorder.metal       # Stitchable Metal shader — holographic rotating border
+│   └── HoloBorder.metal       # Stitchable Metal shader — holographic rotating border (BadgeBorderStyle.metalShader)
 │
 ├── Utilities/
 │   ├── Haptics.swift          # UIImpactFeedbackGenerator wrapper
@@ -71,6 +77,8 @@ AlinaTest/AlinaTest/
 ├── AmountInputView.swift      # Main screen — orchestrates all components
 ├── ContentView.swift          # Entry point → AmountInputView
 └── AlinaTestApp.swift         # @main — calls FontLoader.loadFonts() in init
+
+AppIcon.svg                    # 1024×1024 "A" lettermark for IconComposer (project root)
 ```
 
 ---
@@ -102,51 +110,75 @@ Fonts are loaded at app launch via `FontLoader.loadFonts()` using `CTFontManager
 
 ## Key Implementation Notes
 
-### AUTOMATED Badge — Asset + Metal Fallback
+### AUTOMATED Badge — `BadgeBorderStyle` Enum
 
-`AutomatedBadge` uses the `"border"` image asset as its primary border. If the asset is absent, it falls back to the `holoBorder` Metal shader automatically:
+`AutomatedBadge` exposes a `borderStyle` parameter that selects one of three rendering paths. Default is `.animated`.
 
 ```swift
-private static let hasBorderAsset: Bool = UIImage(named: "border") != nil
-
-@ViewBuilder
-private var borderOverlay: some View {
-    if Self.hasBorderAsset {
-        Image("border").resizable().scaledToFill().clipShape(Capsule())
-    } else {
-        TimelineView(.animation) { tl in
-            let t = Float(tl.date.timeIntervalSinceReferenceDate)
-            Capsule()
-                .stroke(lineWidth: 2)
-                .colorEffect(ShaderLibrary.holoBorder(.float2(w, h), .float(t)))
-        }
-    }
+enum BadgeBorderStyle {
+    /// Static "border" image asset — no animation.
+    case normal
+    /// Image asset animated with SwiftUI brightness + hue rotation.
+    case animated
+    /// Image asset with per-pixel brightness modulation via Metal shader.
+    case metalShader
 }
 ```
 
-### Metal Holographic Border Shader (`Shaders/HoloBorder.metal`)
+| Style | Rendering |
+|-------|-----------|
+| `.normal` | `Image("border")` clipped to `Capsule` — static |
+| `.animated` | Same image + `TimelineView(.animation)` driving `.brightness(0.4 * sin(t * 2.5))` and `.hueRotation(.degrees(sin(t * 0.8) * 40))` |
+| `.metalShader` | Same image + `.drawingGroup()` + `.colorEffect(ShaderLibrary.holoBorder(...))` |
 
-A `[[ stitchable ]]` fragment shader used as the Metal fallback for `AutomatedBadge`. Rather than a horizontal UV sweep (which renders a narrow badge as a single flat colour), it computes each pixel's angle from the view centre via `atan2` and uses that as the gradient coordinate. Adding `time` rotates the brand colours (hot-pink → purple → blue → pink) continuously around the perimeter with a shimmer pulse.
-
-```metal
-float t = fract(angle / (2.0 * M_PI_F) + time * 0.22);
+```swift
+// Three previews provided:
+#Preview("Normal")       { AutomatedBadge(borderStyle: .normal) }
+#Preview("Animated")     { AutomatedBadge(borderStyle: .animated) }
+#Preview("Metal Shader") { AutomatedBadge(borderStyle: .metalShader) }
 ```
 
-Applied via `.colorEffect(ShaderLibrary.holoBorder(.float2(w, h), .float(t)))` on a `Capsule().stroke(lineWidth: 2)`.
+Badge padding: `.horizontal 14`, `.vertical 14`.
+
+### Metal Holographic Border Shader (`Shaders/HoloBorder.metal`)
+
+Used by `BadgeBorderStyle.metalShader`. A `[[ stitchable ]]` fragment shader applied via `.colorEffect` (requires `.drawingGroup()` first to rasterize the image into a pixel buffer). Rather than a horizontal UV sweep, it computes each pixel's angle from the view centre via `atan2` and uses that as the gradient coordinate, producing a clockwise rotation effect around the perimeter.
+
+Effects: deep brightness wave → fast shimmer overlay → two travelling glints (one clockwise, one counter-clockwise).
+
+```metal
+float aT = fract(angle / (2.0f * M_PI_F));
+float wave = 0.30f + 0.70f * (0.5f + 0.5f * sin(aT * 6.28318f - time * 2.5f));
+```
+
+Applied in SwiftUI:
+```swift
+Image("border")
+    .resizable()
+    .scaledToFill()
+    .clipShape(Capsule())
+    .drawingGroup()   // rasterise before colorEffect
+    .colorEffect(ShaderLibrary.holoBorder(
+        .float2(badgeSize.width, badgeSize.height),
+        .float(t)
+    ))
+```
+
+> **Note**: Dynamic array indexing (`stops[i]`) inside `[[ stitchable ]]` shaders causes a silent compile failure (white output). Use `if/else` chains instead.
 
 ### Review Button — 5-Layer Stack
 
-`ReviewButton` uses five stacked layers (back → front) to produce the neon pill effect:
+`ReviewButton` uses five stacked layers (back → front) to produce the neon pill effect. `pillHeight = 50`, `borderInset = 2`, total `ZStack` height = 54.
 
 | Layer | View | Purpose |
 |-------|------|---------|
-| 1 | Blurred `AngularGradient` Capsule | Wide neon bloom behind the button |
-| 2 | `AngularGradient` Capsule (same width as pill) | Thin coloured border peeking out 2 pt top/bottom |
-| 3 | Blurred white Capsule | Inner white halo brightening pill edges |
+| 1 | Blurred `AngularGradient` Capsule | Wide neon bloom behind the button; `scaleEffect(y: 1.5)`, `blur(26)`, `offset(y: 10)` |
+| 2 | `AngularGradient` Capsule + `.padding(.horizontal, borderInset)` | Thin coloured border peeking out 2 pt top/bottom, same width as white pill |
+| 3 | Blurred white Capsule | Inner white halo brightening pill edges; `blur(8)`, `opacity(0.55)` |
 | 4 | Solid white Capsule | The pill surface |
-| 5 | `Text("Review")` | GT Flexa 24 pt, −3 % tracking |
+| 5 | `Text("Review")` | GT Flexa Condensed Medium 24 pt, −3% tracking |
 
-A single `angle: Double` state drives both gradient layers with `.linear(duration: 3).repeatForever`, so the pink → purple → blue colours sweep around the perimeter in sync.
+A single `angle: Double` state drives both gradient layers with `.linear(duration: 3).repeatForever(autoreverses: false)`, so the pink → purple → blue colours sweep around the perimeter in sync.
 
 ### Amount Formatting
 

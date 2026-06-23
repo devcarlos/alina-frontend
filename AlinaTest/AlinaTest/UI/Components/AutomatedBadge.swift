@@ -33,17 +33,17 @@ enum BadgeBorderStyle {
 
 struct AutomatedBadge: View {
 
-    var borderStyle: BadgeBorderStyle = .animated
+    var borderStyle: BadgeBorderStyle = .normal
 
     @State private var badgeSize: CGSize = .zero
 
     var body: some View {
         Text("AUTOMATED")
-            .font(.system(size: 11, weight: .bold))
-            .tracking(1.5)
+            .font(.system(size: 16, weight: .heavy))
+            .tracking(2.0)
             .foregroundStyle(Color.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
             .background(badgeBackground)
             .onGeometryChange(for: CGSize.self, of: \.size) { badgeSize = $0 }
     }
